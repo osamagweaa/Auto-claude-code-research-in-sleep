@@ -68,7 +68,7 @@ cp -r skills/* /path/to/your/project/.agents/skills/
 
 ### 3.2 配置 Codex 审阅 MCP（用于审阅技能）
 
-ARIS 使用外部 LLM（GPT-5.4 via Codex）作为审阅者。在 Antigravity 中启用：
+ARIS 使用外部 LLM（GPT-6-Astra via Codex）作为审阅者。在 Antigravity 中启用：
 
 1. 安装并认证 Codex CLI：
    ```bash
@@ -81,8 +81,8 @@ ARIS 使用外部 LLM（GPT-5.4 via Codex）作为审阅者。在 Antigravity �
    {
      "mcpServers": {
        "codex": {
-         "command": "codex",
-         "args": ["mcp-server"]
+         "command": "python3",
+         "args": ["/ABSOLUTE/PATH/TO/aris_repo/mcp-servers/codex-exec/server.py"]
        }
      }
    }
@@ -93,8 +93,8 @@ ARIS 使用外部 LLM（GPT-5.4 via Codex）作为审阅者。在 Antigravity �
    {
      "mcpServers": {
        "codex": {
-         "command": "codex",
-         "args": ["mcp-server"]
+         "command": "python3",
+         "args": ["/ABSOLUTE/PATH/TO/aris_repo/mcp-servers/codex-exec/server.py"]
        }
      }
    }
@@ -152,7 +152,7 @@ Antigravity 使用 `GEMINI.md`（等价于 Claude Code 的 `CLAUDE.md`）存放�
 
 - 课题: [你的研究方向]
 - 目标会议: ICLR/NeurIPS/ICML
-- 关键文件: NARRATIVE_REPORT.md, IDEA_REPORT.md
+- 关键文件: NARRATIVE_REPORT.md, idea-stage/IDEA_REPORT.md
 ```
 
 ## 4. 如何调用 Skills
@@ -260,16 +260,16 @@ Antigravity 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 
 
 | 阶段 | 执行方式 | 产出文件 |
 |------|---------|---------|
-| 1 | 创意发现：`skills/idea-discovery/SKILL.md` + 研究方向 | `IDEA_REPORT.md`, `refine-logs/FINAL_PROPOSAL.md`, `refine-logs/EXPERIMENT_PLAN.md` |
+| 1 | 创意发现：`skills/idea-discovery/SKILL.md` + 研究方向 | `idea-stage/IDEA_REPORT.md`, `refine-logs/FINAL_PROPOSAL.md`, `refine-logs/EXPERIMENT_PLAN.md` |
 | 2 | 实验桥接：`skills/experiment-bridge/SKILL.md` | 实验脚本与结果 |
-| 3 | 自动评审：`skills/auto-review-loop/SKILL.md` | `AUTO_REVIEW.md` |
+| 3 | 自动评审：`skills/auto-review-loop/SKILL.md` | `review-stage/AUTO_REVIEW.md` |
 | 4 | 论文写作：`skills/paper-writing/SKILL.md` + `NARRATIVE_REPORT.md` | `paper/` 目录 |
 
 ## 6. MCP 工具对照
 
 | ARIS MCP 工具 | 作用 | 需要的 MCP Server |
 |--------------|------|------------------|
-| `mcp__codex__codex` | 发审阅请求到 GPT-5.4 | codex |
+| `mcp__codex__codex` | 发审阅请求到 GPT-6-Astra | codex |
 | `mcp__codex__codex-reply` | 续接审阅线程 | codex |
 | `mcp__llm-chat__chat` | 发请求到兼容 OpenAI API 模型 | llm-chat |
 | `mcp__zotero__*` | 搜索 Zotero 文献库 | zotero |
@@ -279,9 +279,9 @@ Antigravity 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 
 
 | 文件 | 作用 | 对应流程 |
 |------|------|---------|
-| `REVIEW_STATE.json` | 自动评审进度 | auto-review-loop |
-| `AUTO_REVIEW.md` | 累计评审日志 | auto-review-loop |
-| `IDEA_REPORT.md` | 创意筛选与排名 | idea-discovery |
+| `review-stage/REVIEW_STATE.json` | 自动评审进度 | auto-review-loop |
+| `review-stage/AUTO_REVIEW.md` | 累计评审日志 | auto-review-loop |
+| `idea-stage/IDEA_REPORT.md` | 创意筛选与排名 | idea-discovery |
 | `PAPER_PLAN.md` | 论文大纲 + claim-evidence matrix | paper-plan |
 | `refine-logs/FINAL_PROPOSAL.md` | 精化后的方法提案 | research-refine |
 | `refine-logs/EXPERIMENT_PLAN.md` | 实验路线图 | experiment-plan |
@@ -289,7 +289,7 @@ Antigravity 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 
 中断恢复示例：
 
 ```
-读取 skills/auto-review-loop/SKILL.md，然后读取 REVIEW_STATE.json 和 AUTO_REVIEW.md。
+读取 skills/auto-review-loop/SKILL.md，然后读取 review-stage/REVIEW_STATE.json 和 review-stage/AUTO_REVIEW.md。
 从保存的状态恢复自动评审循环。
 ```
 
@@ -309,8 +309,8 @@ Antigravity 内置浏览器，可用于：
 
 ### Artifact 系统
 ARIS 产出自然映射到 Antigravity 的 artifact 系统：
-- `IDEA_REPORT.md` → implementation plan artifact
-- `AUTO_REVIEW.md` → walkthrough artifact
+- `idea-stage/IDEA_REPORT.md` → implementation plan artifact
+- `review-stage/AUTO_REVIEW.md` → walkthrough artifact
 - `PAPER_PLAN.md` → implementation plan artifact
 
 ### 知识持久化

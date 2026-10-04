@@ -1,29 +1,102 @@
 # `skills-codex`
 
-Codex-native mirror of the base ARIS skill set.
+Codex-native mirror and adaptation layer for the main ARIS `skills/` package.
 
 ## Scope
 
-This package keeps the main `skills/` workflows available for OpenAI Codex CLI.
+- Base mirror coverage: all `83` mainline skills under `skills/`
+- Support directory: `shared-references/`, with all `30/30` mainline reference names mirrored
+- Default reviewer contract for reviewer-heavy skills:
+  - round 1: `spawn_agent`
+  - follow-up: `send_input`
+  - reasoning effort: `xhigh`
+  - base Codex self-review: `review_independence: same-family`,
+    `acceptance_status: provisional`
+  - Claude/Gemini overlays or deterministic verification: `acceptance_status: accepted`
+- Optional overlays:
+  - `skills-codex-claude-review`
+  - `skills-codex-gemini-review`
 
-Recent core workflow follow-up skills mirrored here include:
+This package is still an appendage to the Claude mainline, not a separate Codex-first product line.
 
-- `training-check`
-- `result-to-claim`
-- `ablation-planner`
+## Recommended Install
 
-These skills cover the experiment follow-up chain:
-
-1. monitor training quality early
-2. judge what claims the results actually support
-3. design reviewer-facing ablations before paper writing
-
-## Install
-
-Copy this directory into your Codex skills path:
+Project-local install is the default path for Codex:
 
 ```bash
-cp -a skills/skills-codex/* ~/.codex/skills/
+git clone https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep.git ~/aris_repo
+cd ~/your-project
+
+bash ~/aris_repo/tools/install_aris_codex.sh .
 ```
 
-If you also use reviewer overlay packages, install this base package first, then apply the overlay on top.
+This creates a flat managed layout:
+
+```text
+.agents/skills/<skill-name> -> ~/aris_repo/skills/skills-codex/<skill-name>
+.aris/installed-skills-codex.txt
+AGENTS.md   # managed Codex block
+```
+
+Reconcile after upstream changes:
+
+```bash
+cd ~/aris_repo && git pull
+bash ~/aris_repo/tools/install_aris_codex.sh ~/your-project --reconcile
+```
+
+Uninstall only managed Codex entries:
+
+```bash
+bash ~/aris_repo/tools/install_aris_codex.sh ~/your-project --uninstall
+```
+
+## Optional Overlays
+
+Install the base first, then choose an overlay:
+
+```bash
+bash ~/aris_repo/tools/install_aris_codex.sh ~/your-project --reconcile --with-claude-review-overlay
+```
+
+```bash
+bash ~/aris_repo/tools/install_aris_codex.sh ~/your-project --reconcile --with-gemini-review-overlay
+```
+
+Overlays only replace reviewer routing. They do not replace the base mirror or the executor model.
+
+## Copy Install and Update
+
+If you intentionally use a copied Codex install instead of managed project symlinks:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -a ~/aris_repo/skills/skills-codex/. ~/.codex/skills/
+```
+
+Update copied installs with:
+
+```bash
+bash ~/aris_repo/tools/smart_update_codex.sh
+bash ~/aris_repo/tools/smart_update_codex.sh --apply
+```
+
+For a copied project-local Codex install:
+
+```bash
+bash ~/aris_repo/tools/smart_update_codex.sh --project ~/your-project
+bash ~/aris_repo/tools/smart_update_codex.sh --project ~/your-project --apply
+```
+
+`smart_update_codex.sh` refuses symlink-managed installs and redirects them to `install_aris_codex.sh --reconcile`.
+
+## Non-Degrading Skills
+
+The following Codex skills must not silently degrade when their required capability is missing:
+
+- `comm-lit-review`
+- `research-lit`
+- `paper-poster-html`
+- `pixel-art`
+
+If the required source, reviewer, or local preview capability is unavailable, the skill should stop and tell the user what to configure.

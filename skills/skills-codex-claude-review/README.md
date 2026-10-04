@@ -8,6 +8,11 @@ This package is a **thin override layer** for users who want:
 
 It is designed to sit on top of the upstream Codex-native package at `skills/skills-codex/`.
 
+Because the executor is Codex and the reviewer is Claude, overlay traces and
+audit artifacts record `review_independence: cross-family` and
+`acceptance_status: accepted`. The verifier still decides whether all required
+audits reached accepted assurance.
+
 ## What this package contains
 
 - Only the review-heavy skill overrides that need a different reviewer backend
@@ -27,17 +32,16 @@ Current overrides:
 
 ## Install
 
-1. Install the base Codex-native skills first:
+1. Install the base Codex-native mirror first:
 
 ```bash
-mkdir -p ~/.codex/skills
-cp -a skills/skills-codex/* ~/.codex/skills/
+bash ~/aris_repo/tools/install_aris_codex.sh ~/your-project
 ```
 
-2. Install the Claude-review overrides second:
+2. Re-run with the Claude overlay enabled:
 
 ```bash
-cp -a skills/skills-codex-claude-review/* ~/.codex/skills/
+bash ~/aris_repo/tools/install_aris_codex.sh ~/your-project --reconcile --with-claude-review-overlay
 ```
 
 3. Register the local reviewer bridge:

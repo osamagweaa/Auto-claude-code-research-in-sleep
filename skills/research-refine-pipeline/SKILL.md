@@ -1,7 +1,7 @@
 ---
 name: research-refine-pipeline
 description: 'Run an end-to-end workflow that chains `research-refine` and `experiment-plan`. Use when the user wants a one-shot pipeline from vague research direction to focused final proposal plus detailed experiment roadmap, or asks to "串起来", build a pipeline, do it end-to-end, or generate both the method and experiment plan together.'
-allowed-tools: Bash(*), Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, Agent, mcp__codex__codex, mcp__codex__codex-reply
+allowed-tools: Bash(*), Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, mcp__codex__codex, mcp__codex__codex-reply
 ---
 
 # Research Refine Pipeline: End-to-End Method and Experiment Planning
@@ -155,6 +155,13 @@ Pipeline summary:
 Best next step:
 - /run-experiment
 ```
+
+## Output Protocols
+
+> Follow these shared protocols for all output files:
+> - **[Output Versioning Protocol](../shared-references/output-versioning.md)** — write timestamped file first, then copy to fixed name
+> - **[Output Manifest Protocol](../shared-references/output-manifest.md)** — log every output to MANIFEST.md
+> - **[Output Language Protocol](../shared-references/output-language.md)** — respect the project's language setting
 
 ## Key Rules
 

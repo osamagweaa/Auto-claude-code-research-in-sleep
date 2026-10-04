@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import shutil
 from pathlib import Path
@@ -27,10 +28,39 @@ TARGET_SKILLS = [
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", re.DOTALL)
 SPAWN_BLOCK_RE = re.compile(r"```(?:yaml|text)?\nspawn_agent:\n([\s\S]*?)```")
 SEND_BLOCK_RE = re.compile(r"```(?:yaml|text)?\nsend_input:\n([\s\S]*?)```")
+REVIEW_CALL_BLOCK_RE = re.compile(
+    r"```(?:yaml|text)?\n(?:mcp__claude-review__review_start:|mcp__claude-review__review_reply_start:)[\s\S]*?```"
+)
+TOOLS_KEY_RE = re.compile(r"^\s{2}tools:", re.MULTILINE)
+
+# The claude-review bridge runs the reviewer with `--tools ""` by default: the
+# executor pastes every piece of evidence into the prompt, so the reviewer needs
+# no filesystem access at all. Some review prompts instead hand the reviewer
+# artifact paths and tell it to open them itself. Those calls have to opt into
+# read-only tools, or the reviewer is told to read files it has no tool to read.
+ARTIFACT_REVIEW_TOOLS = "Read,Grep,Glob"
+ARTIFACT_TOOLS_COMMENT = (
+    "  # the bridge grants the reviewer no tools by default; this prompt passes\n"
+    "  # artifact paths, so it has to ask for read-only access explicitly\n"
+)
+
+# A review block is artifact-grounded when its prompt points the reviewer at a
+# path instead of pasting the evidence inline.
+ARTIFACT_PROMPT_CUES = (
+    "read the files yourself",
+    "read them yourself",
+    "read the diff",
+    "read the raw diff",
+    "verbatim files",
+    "/absolute/path/to/",
+)
 
 OVERRIDE_NOTE = (
     "> Override for Codex users who want **Claude Code**, not a second Codex agent, "
-    "to act as the reviewer. Install this package **after** `skills/skills-codex/*`."
+    "to act as the reviewer. Install this package **after** `skills/skills-codex/*`.\n>\n"
+    "> This reviewer is a different model family from the Codex executor. Every "
+    "overlay trace/audit records:\n>\n> ```yaml\n> review_independence: cross-family\n"
+    "> acceptance_status: accepted\n> ```"
 )
 
 REVIEWER_LINE = (
@@ -66,15 +96,31 @@ def extract_field(frontmatter: str, field: str) -> str:
 
 
 def build_frontmatter(name: str, description: str) -> str:
-    safe_desc = description.replace('"', '\\"')
-    return f'---\nname: "{name}"\ndescription: "{safe_desc}"\n---\n\n'
+    # JSON strings are a valid subset of YAML double-quoted scalars. Using a
+    # serializer here keeps backslashes and quotes from being escaped twice.
+    return (
+        f'---\nname: {json.dumps(name, ensure_ascii=False)}\n'
+        f'description: {json.dumps(description, ensure_ascii=False)}\n'
+        '---\n\n'
+    )
 
 
 def normalize_description(text: str) -> str:
     text = text or "Claude-review override for a Codex-native ARIS skill."
+    # A few legacy Codex-mirror descriptions contain an extra escape layer
+    # (the parsed value is `\\\"` instead of `\"`). Remove that layer before
+    # serializing the Claude overlay so regeneration stays idempotent.
+    text = text.replace('\\\"', '"')
     text = text.replace("GPT using a secondary Codex agent", "Claude via claude-review MCP")
     text = text.replace("using a secondary Codex agent", "using Claude Code via claude-review MCP")
-    text = text.replace("via GPT-5.4 xhigh review", "via Claude review through claude-review MCP")
+    text = text.replace("via GPT-6-Astra xhigh review", "via Claude review through claude-review MCP")
+    text = text.replace("(Codex GPT-6-Astra ultra)", "(Claude via claude-review MCP)")
+    text = text.replace("(Codex GPT-6-Astra xhigh)", "(Claude via claude-review MCP)")
+    text = text.replace("iterative GPT-6-Astra review", "iterative Claude review")
+    text = text.replace("GPT-6-Astra", "Claude")
+    text = text.replace("via GPT-6-Astra ultra review", "via Claude review through claude-review MCP")
+    text = text.replace("via GPT-5.5 xhigh review", "via Claude review through claude-review MCP")
+    text = text.replace("GPT-5.5", "Claude through claude-review MCP")
     return text
 
 
@@ -106,6 +152,12 @@ def rewrite_send_block(match: re.Match[str]) -> str:
             continue
         if stripped.startswith("model:") or stripped.startswith("reasoning_effort:"):
             continue
+        if stripped.startswith("target:"):
+            out.append(line.replace("target:", "threadId:", 1))
+            continue
+        if stripped.startswith("agent_id:"):
+            out.append(line.replace("agent_id:", "threadId:", 1))
+            continue
         if stripped.startswith("id:"):
             out.append(line.replace("id:", "threadId:", 1))
             continue
@@ -131,20 +183,55 @@ def append_async_notes(text: str) -> str:
             return block
         return f"{block}\n\n{note}"
 
-    return re.sub(
-        r"```(?:yaml|text)?\n(?:mcp__claude-review__review_start:|mcp__claude-review__review_reply_start:)[\s\S]*?```",
-        repl,
-        text,
-    )
+    return REVIEW_CALL_BLOCK_RE.sub(repl, text)
+
+
+def is_artifact_grounded(block: str) -> bool:
+    lowered = block.lower()
+    return any(cue in lowered for cue in ARTIFACT_PROMPT_CUES)
+
+
+def add_artifact_review_tools(text: str) -> str:
+    """Opt artifact-grounded review calls into read-only reviewer tools.
+
+    Prompt-only blocks are left alone so the bridge default (`--tools ""`)
+    keeps covering them.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        block = match.group(0)
+        if TOOLS_KEY_RE.search(block) or not is_artifact_grounded(block):
+            return block
+        header_end = block.index("\n", block.index("mcp__claude-review__review_")) + 1
+        opt_in = f'{ARTIFACT_TOOLS_COMMENT}  tools: "{ARTIFACT_REVIEW_TOOLS}"\n'
+        return f"{block[:header_end]}{opt_in}{block[header_end:]}"
+
+    return REVIEW_CALL_BLOCK_RE.sub(repl, text)
 
 
 def transform_body(text: str) -> str:
+    text = re.sub(
+        r"> \*\*Codex assurance:\*\*[\s\S]*?(?=\n\n)",
+        "> **Claude overlay assurance:** this route is a different model family "
+        "from the Codex executor and records `review_independence: cross-family` "
+        "plus `acceptance_status: accepted`.",
+        text,
+        count=1,
+    )
+    # The acquittal receipt example is a literal the overlay would copy verbatim.
+    # This pack's backend is claude-review, so leaving the source's "codex" in it
+    # makes every overlay run write a false receipt.
+    text = text.replace('"backend":"codex","effort":"xhigh"', '"backend":"claude-review","effort":"high-rigor"')
+    text = text.replace('"backend": "codex", "effort": "xhigh"', '"backend": "claude-review", "effort": "high-rigor"')
+    text = text.replace('"backend":"codex"', '"backend":"claude-review"')
     text = text.replace("secondary Codex agent", "Claude reviewer via `claude-review` MCP")
     text = text.replace("via a Claude reviewer via `claude-review` MCP (xhigh reasoning)", "via `claude-review` MCP (high-rigor review)")
     text = text.replace("secondary Codex agent (xhigh reasoning)", "Claude reviewer via `claude-review` MCP")
-    text = text.replace("GPT-5.4 xhigh", "Claude review")
-    text = text.replace("Send the full paper text to GPT-5.4 xhigh:", "Send the full paper text to Claude through `claude-review`:")
-    text = text.replace("Send the complete outline to GPT-5.4 xhigh for feedback:", "Send the complete outline to Claude for feedback:")
+    text = text.replace("GPT-6-Astra xhigh", "Claude review")
+    text = text.replace("GPT-6-Astra ultra", "Claude review")
+    text = text.replace("GPT-5.5 xhigh", "Claude review")
+    text = text.replace("Send the full paper text to GPT-5.5 xhigh:", "Send the full paper text to Claude through `claude-review`:")
+    text = text.replace("Send the complete outline to GPT-5.5 xhigh for feedback:", "Send the complete outline to Claude for feedback:")
     text = text.replace("Call REVIEWER_MODEL via `spawn_agent` (`spawn_agent`) with xhigh reasoning:", "Call REVIEWER_MODEL via `mcp__claude-review__review_start` with high-rigor review:")
     text = text.replace("Send a detailed prompt with xhigh reasoning:", "Send a detailed prompt with high-rigor review:")
     text = text.replace("Use `send_input` with the returned agent id to continue the conversation:", "Use `mcp__claude-review__review_reply_start` with the saved completed `threadId`, then poll `mcp__claude-review__review_status` with the returned `jobId` until `done=true` to continue the conversation:")
@@ -157,16 +244,47 @@ def transform_body(text: str) -> str:
     text = text.replace("Save the agent id for Round 2.", "Save the completed `threadId` for Round 2.")
     text = text.replace("**CRITICAL: Save the `agent_id`** from this call for all later rounds.", "**CRITICAL: Save the returned `jobId`**, poll `mcp__claude-review__review_status` until `done=true`, then save the completed `threadId` from the status result for all later rounds.")
     text = text.replace("- **ALWAYS use `reasoning_effort: xhigh`** for all Codex review calls.", "- **Always ask the Claude reviewer for strict, high-rigor feedback** in every review round.")
+    text = text.replace("- ALWAYS use `model: gpt-6-astra` + `reasoning_effort: ultra` for reviews (deep-audit tier; capability fallback per `reviewer-routing.md`, never below `xhigh`)", "- **Always ask the Claude reviewer for strict, high-rigor feedback** in every review round.")
     text = text.replace("- **Save `agent_id` from Phase 2** and use `send_input` for later rounds.", "- **Save the completed `threadId` from Phase 2** and use `mcp__claude-review__review_reply_start` plus `mcp__claude-review__review_status` for later rounds.")
     text = text.replace("- **Use `send_input`** for Round 2 to maintain conversation context", "- **Use `mcp__claude-review__review_reply_start` plus `mcp__claude-review__review_status`** for Round 2 to maintain conversation context")
-    text = text.replace("GPT-5.4 responses", "Claude reviewer responses")
+    text = text.replace("GPT-5.5 responses", "Claude reviewer responses")
+    text = text.replace("same-family provisional review", "cross-family accepted Claude review")
+    text = text.replace("same-family provisional", "cross-family accepted")
+    text = text.replace("A fresh Codex positive review", "A fresh Claude positive review")
+    text = re.sub(
+        r"^- \*\*REVIEWER_BACKEND = `codex`\*\*.*$",
+        "- **REVIEWER_BACKEND = `claude-review`** — Cross-family Claude reviewer "
+        "through the local bridge; positive verdicts record accepted.",
+        text,
+        flags=re.MULTILINE,
+    )
     text = text.replace("`agent_id`", "`thread_id`")
     text = text.replace('"agent_id"', '"thread_id"')
     text = text.replace("ALWAYS use `reasoning_effort: xhigh` for reviews", "Always ask the Claude reviewer for strict, high-rigor feedback.")
     text = text.replace("ALWAYS use `reasoning_effort: xhigh` for maximum reasoning depth", "Always ask the Claude reviewer for strict, high-rigor feedback.")
-    text = text.replace("mcp__codex__codex", "mcp__claude-review__review_start")
+    # the Codex tier-pinning bullet has no meaning for a Claude reviewer
+    text = re.sub(r"^- ALWAYS pin `model: [^`]+` \+ `reasoning_effort: xhigh`.*$",
+                  "- Always ask the Claude reviewer for strict, high-rigor feedback.", text, flags=re.MULTILINE)
     text = text.replace("mcp__codex__codex-reply", "mcp__claude-review__review_reply_start")
+    text = text.replace("mcp__codex__codex", "mcp__claude-review__review_start")
     text = re.sub(r"^-\s+\*{0,2}REVIEWER_MODEL.*$", REVIEWER_LINE, text, flags=re.MULTILINE)
+    text = re.sub(r"^-\s+\*{0,2}REVIEWER_BACKEND.*$",
+                  "- **REVIEWER_BACKEND = `claude-review`** — reviews route through the claude-review MCP (Claude family; cross-family for a Codex executor).",
+                  text, flags=re.MULTILINE)
+    text = text.replace("GPT-6-Astra", "Claude")
+    text = text.replace("gpt-6-astra", "the claude-review model")
+    text = text.replace("uses normal Codex xhigh review through", "uses a normal high-rigor Claude review through")
+    text = text.replace("Claude review Review (Round", "Claude Review (Round")
+    text = text.replace("Never pass a prior agent_id into", "Never pass a prior threadId into")
+    text = text.replace("store the returned agent_id for crash recovery only", "store the returned threadId for crash recovery only")
+    text = text.replace("Save the agent_id for Round 2.", "Save the completed threadId for Round 2.")
+    text = text.replace("Save the returned agent_id only for recovery bookkeeping.", "Save the returned threadId only for recovery bookkeeping.")
+    text = text.replace("via a Claude reviewer via `claude-review` MCP (ultra reasoning)", "via `claude-review` MCP (high-rigor review)")
+    text = text.replace("saved agent id", "saved threadId")
+    text = text.replace("— Codex Review", "— Claude Review")
+    # generic prose mop-up — AFTER all longer specific rows
+    text = text.replace("`spawn_agent`", "`mcp__claude-review__review_start`")
+    text = text.replace("`send_input`", "`mcp__claude-review__review_reply_start`")
     text = re.sub(
         r"## Prerequisites\n\n(?:- .*\n)+",
         PREREQ_BLOCK + "\n\n",
@@ -179,7 +297,32 @@ def transform_body(text: str) -> str:
         "```\nreasoning_effort: xhigh\n```",
         "```\nmcp__claude-review__review_start:\n  prompt: |\n    [Full novelty briefing + prior work list + specific novelty questions]\n```",
     )
-    return append_async_notes(text)
+    # New base-skill prose can mention Codex-native routes outside fenced tool
+    # examples. Normalize those residual references after rewriting the blocks so
+    # generated overlays never instruct users to mix Codex agents with Claude MCP.
+    text = text.replace("Codex xhigh review", "Claude high-rigor review")
+    text = text.replace("Codex Review", "Claude Review")
+    text = text.replace("Codex/GPT-5.5", "Claude reviewer")
+    text = text.replace("GPT-5.5", "the Claude reviewer")
+    text = text.replace("spawn_agent", "mcp__claude-review__review_start")
+    text = text.replace("send_input", "mcp__claude-review__review_reply_start")
+    text = text.replace("agent_id", "threadId")
+    text = text.replace("thread_id", "threadId")
+    text = text.replace("agent id", "completed threadId")
+    text = text.replace("agent ID", "completed threadId")
+    text = text.replace("same agent", "same completed threadId")
+    # A Read/Grep/Glob reviewer can open a saved diff file but cannot run
+    # `git diff`; the codex mirror's wording offers the range as an option.
+    text = text.replace(
+        "- Changed since last round: <changed-file paths> — read the diff, not my description",
+        "- Changed since last round: <changed-file paths>, plus the saved diff "
+        "(`git diff > changes.patch`): <path> — read the diff, not my description",
+    )
+    text = text.replace(
+        "- Raw diff: <path, or the `git diff` range>",
+        "- Raw diff: <path to a saved diff file — you can read files but cannot run `git diff`>",
+    )
+    return append_async_notes(add_artifact_review_tools(text))
 
 
 def generate_one(skill_name: str) -> None:

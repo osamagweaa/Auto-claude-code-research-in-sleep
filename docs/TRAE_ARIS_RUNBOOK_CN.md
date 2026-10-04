@@ -62,8 +62,8 @@ codex login
 2) 在 Trae 中配置 MCP  
 进入 `Settings → MCP → 手动添加`，新增：
 - Name: `codex`
-- Command: `codex`
-- Args: `mcp-server`
+- Command: `python3`
+- Args: `/ABSOLUTE/PATH/TO/aris_repo/mcp-servers/codex-exec/server.py`（ARIS 自带的桥接，底下跑 `codex exec`；codex-cli 0.154 删掉了 `codex mcp-server`）
 
 如你的 Trae 版本支持工作区 MCP 文件，可用：
 
@@ -71,8 +71,8 @@ codex login
 {
   "mcpServers": {
     "codex": {
-      "command": "codex",
-      "args": ["mcp-server"]
+      "command": "python3",
+      "args": ["/ABSOLUTE/PATH/TO/aris_repo/mcp-servers/codex-exec/server.py"]
     }
   }
 }
@@ -187,7 +187,7 @@ Trae 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 技能�
 5. 使用 research-refine-pipeline 技能 —— 方法精化 + 实验规划
 ```
 
-> **提示：** 如果上下文过长，可以将每个阶段拆分为单独的对话，通过文件（如 `IDEA_REPORT.md`、`refine-logs/FINAL_PROPOSAL.md`）传递结果。
+> **提示：** 如果上下文过长，可以将每个阶段拆分为单独的对话，通过文件（如 `idea-stage/IDEA_REPORT.md`、`refine-logs/FINAL_PROPOSAL.md`）传递结果。
 
 ### Workflow 1.5: Experiment Bridge（实验桥接）
 
@@ -244,9 +244,9 @@ Trae 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 技能�
 
 | 阶段 | 执行方式 | 产出文件 |
 |------|---------|---------|
-| 1 | 创意发现：使用 `idea-discovery` 技能 + 研究方向 | `IDEA_REPORT.md`, `refine-logs/FINAL_PROPOSAL.md`, `refine-logs/EXPERIMENT_PLAN.md` |
+| 1 | 创意发现：使用 `idea-discovery` 技能 + 研究方向 | `idea-stage/IDEA_REPORT.md`, `refine-logs/FINAL_PROPOSAL.md`, `refine-logs/EXPERIMENT_PLAN.md` |
 | 2 | 实验桥接：使用 `experiment-bridge` 技能 | 实验脚本与结果 |
-| 3 | 自动评审：使用 `auto-review-loop` 技能 | `AUTO_REVIEW.md` |
+| 3 | 自动评审：使用 `auto-review-loop` 技能 | `review-stage/AUTO_REVIEW.md` |
 | 4 | 论文写作：使用 `paper-writing` 技能 + `NARRATIVE_REPORT.md` | `paper/` 目录 |
 
 每个阶段读取上一阶段的产出文件，因此上下文可在不同对话间传递。
@@ -255,7 +255,7 @@ Trae 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 技能�
 
 | ARIS MCP 工具 | 作用 | 需要的 MCP Server |
 |---|---|---|
-| `mcp__codex__codex` | 发审阅请求到 GPT-5.4 | codex |
+| `mcp__codex__codex` | 发审阅请求到 GPT-6-Astra | codex |
 | `mcp__codex__codex-reply` | 续接审阅线程 | codex |
 | `mcp__llm-chat__chat` | 发请求到兼容 OpenAI API 模型 | llm-chat |
 
@@ -263,9 +263,9 @@ Trae 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 技能�
 
 | 文件 | 作用 | 典型流程 |
 |---|---|---|
-| `REVIEW_STATE.json` | 记录自动审阅进度 | auto-review-loop |
-| `AUTO_REVIEW.md` | 累计审阅日志 | auto-review-loop |
-| `IDEA_REPORT.md` | 创意筛选与初评结果 | idea-discovery |
+| `review-stage/REVIEW_STATE.json` | 记录自动审阅进度 | auto-review-loop |
+| `review-stage/AUTO_REVIEW.md` | 累计审阅日志 | auto-review-loop |
+| `idea-stage/IDEA_REPORT.md` | 创意筛选与初评结果 | idea-discovery |
 | `PAPER_PLAN.md` | 论文大纲与 claim-evidence matrix | paper-plan |
 | `PAPER_IMPROVEMENT_LOG.md` | 论文改进回合日志 | auto-paper-improvement-loop |
 
@@ -273,8 +273,8 @@ Trae 通过 `SKILL.md` 中的 YAML `description` 字段自动发现 ARIS 技能�
 
 ```text
 @skills/auto-review-loop/SKILL.md
-@REVIEW_STATE.json
-@AUTO_REVIEW.md
+@review-stage/REVIEW_STATE.json
+@review-stage/AUTO_REVIEW.md
 Resume the auto review loop from saved state.
 ```
 
